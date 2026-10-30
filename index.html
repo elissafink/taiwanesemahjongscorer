@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tai Trainer — Taiwanese Mahjong Scoring</title>
+<link rel="icon" href="data:,">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #123329; }
+  #root { min-height: 100vh; }
+  #boot-error {
+    display: none; font-family: -apple-system, sans-serif; color: #F1EAD7;
+    background: #3a1414; padding: 20px; margin: 16px; border-radius: 10px; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="boot-error"></div>
+
+<script type="text/plain" id="app-source">
+
+/* ---------------------------------------------------------------
+   SCORING SYSTEMS
+   Two independent rule sets the person can switch between. Each
+   carries its own categories, colors, and pattern list so nothing
+   is assumed to transfer between them.
+--------------------------------------------------------------- */
+
+/* ---- Generic Internet -------------------------------------------------
+   Source: Four Winds Rule Collection — Taiwanese 16-Tile Mah Jong,
+   "Scoring" (https://4windsmj.com/kb/rules/taiwanese/rules05.htm)
+   Taiwanese mahjong scoring varies by house rules; this is one
+   widely-cited standard list, not an official universal ruling.
+------------------------------------------------------------------- */
+const GENERIC_CATEGORIES = ["Bonus", "Sets", "Honors", "Waits", "Structure", "Suits", "Timing", "Limit"];
+const GENERIC_CAT_COLOR = {
+  Bonus: "#C9A24B", Sets: "#4F7942", Honors: "#B23A2E", Waits: "#7A8B99",
+  Structure: "#8C6B4F", Suits: "#3E6B8A", Timing: "#9B6B9E", Limit: "#B23A2E",
+};
+const GENERIC_PATTERNS = [
+  { id: "flower", en: "Each Flower or Season", zh: "花牌", cat: "Bonus", tai: 1, note: "Per tile held, if flowers/seasons are in play. There are 8 bonus tiles total: 4 flowers + 4 seasons.",
+    ex: ["🀢", "🀣", "🀤", "🀥", "🀦", "🀧", "🀨", "🀩"], exCap: "The full bonus set: Plum, Orchid, Bamboo, Chrysanthemum (flowers) and Spring, Summer, Autumn, Winter (seasons). Each one drawn adds 1 tai on its own." },
+  { id: "noflower", en: "No Flowers or Seasons", zh: "無花", cat: "Bonus", tai: 1, note: "Consolation tai for holding none.",
+    ex: ["🀫", "🀫", "🀫", "🀫"], exCap: "Hand contains zero flower/season tiles — a small consolation tai for the empty-handed." },
+  { id: "winning", en: "Winning", zh: "胡", cat: "Bonus", tai: 2, note: "Base tai every winning hand receives.",
+    ex: ["🀇", "🀈", "🀉", "🀜", "🀝", "🀞", "🀖", "🀗", "🀘", "🀄", "🀄", "🀄", "🀀", "🀀", "🀀", "🀙", "🀙"], exCap: "Any complete, valid winning hand — 5 sets + a pair, 17 tiles total — earns this baseline 2 tai before anything else is counted." },
+  { id: "honorpung", en: "Pung/Kong of Honors", zh: "番牌刻", cat: "Sets", tai: 1, note: "Dragons or any wind, per set.",
+    ex: ["🀄", "🀄", "🀄"], exCap: "A triplet of Red Dragon (or any dragon/wind triplet) — 1 tai per such set." },
+  { id: "meldedkong", en: "Melded Kong", zh: "明槓", cat: "Sets", tai: 1, note: "",
+    ex: ["🀆", "🀆", "🀆", "🀆"], exCap: "A kong (4 of a kind) declared openly, using a tile claimed from another player." },
+  { id: "concealedkong", en: "Concealed Kong", zh: "暗槓", cat: "Sets", tai: 2, note: "",
+    ex: ["🀅", "🀅", "🀅", "🀅"], exCap: "A kong built entirely from tiles in your own hand, never exposed by a claim." },
+  { id: "purestraight", en: "3 Chows of 1 Suit, Step 3", zh: "一氣通貫", cat: "Sets", tai: 5, note: "e.g. 123-456-789 same suit. 10 tai if fully concealed.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏"], exCap: "1-2-3, 4-5-6, 7-8-9 of Characters — the full run of a single suit across three chows." },
+  { id: "twoconcealed", en: "Two Concealed Triplets", zh: "兩暗刻", cat: "Sets", tai: 2, note: "Concealed kongs count.",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚"], exCap: "Two triplets built in-hand (not claimed) — here, Character 1s and Dot 2s." },
+  { id: "threeconcealed", en: "Three Concealed Triplets", zh: "三暗刻", cat: "Sets", tai: 5, note: "",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐"], exCap: "Three self-built triplets, none of them claimed from an opponent's discard." },
+  { id: "fourconcealed", en: "Four Concealed Triplets", zh: "四暗刻", cat: "Sets", tai: 15, note: "",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐", "🀄", "🀄", "🀄"], exCap: "Four concealed triplets — a fifth set (any shape) and the pair still complete the rest of this 5-set hand." },
+  { id: "fiveconcealed", en: "Five Concealed Triplets", zh: "五暗刻", cat: "Sets", tai: 40, note: "Rare — 16-tile hands can hold 5 sets.",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐", "🀄", "🀄", "🀄", "🀅", "🀅", "🀅"], exCap: "All five sets are concealed triplets — extremely rare, hence the 40-tai payoff." },
+  { id: "littledragons", en: "Little Three Dragons", zh: "小三元", cat: "Honors", tai: 15, note: "2 dragon pungs + dragon pair.",
+    ex: ["🀄", "🀄", "🀄", "🀅", "🀅", "🀅", "🀆", "🀆"], exCap: "Two dragon triplets (Red, Green) plus a pair of the third dragon (White)." },
+  { id: "littlewinds", en: "Little Three Winds", zh: "小三風", cat: "Honors", tai: 5, note: "2 wind pungs + wind pair.",
+    ex: ["🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀂", "🀂"], exCap: "Two wind triplets (East, South) plus a pair of a third wind (West)." },
+  { id: "bigwinds3", en: "Big Three Winds", zh: "大三風", cat: "Honors", tai: 15, note: "3 wind pungs.",
+    ex: ["🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀂", "🀂", "🀂"], exCap: "Three full wind triplets — East, South, and West all as pungs." },
+  { id: "exposedpairwait", en: "Exposed Hand, Waiting on Pair", zh: "缺一門單釣", cat: "Waits", tai: 10, note: "Fully exposed except waiting to pair the last tile.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀐", "🀑", "🀒", "🀄", "🀄", "🀄", "🀙"], exCap: "All 5 sets are already melded on the table; only a single tile is left, waiting to become the pair." },
+  { id: "concealedhand", en: "Concealed Hand", zh: "門前清", cat: "Structure", tai: 1, note: "No melds called; won on the discard.",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "No pung/chow/kong was ever called from another player — the hand stayed fully in your rack until the win." },
+  { id: "fullyconcealed", en: "Fully Concealed Hand", zh: "不求人", cat: "Structure", tai: 3, note: "Concealed hand won by self-draw.",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "Same as Concealed Hand, but you also drew the winning tile yourself rather than claiming a discard." },
+  { id: "chowhand", en: "Chow Hand", zh: "平胡", cat: "Structure", tai: 3, note: "No pungs or kongs at all.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀜", "🀜"], exCap: "The whole hand is built from 5 chows (runs) plus a pair — no triplets or kongs anywhere." },
+  { id: "chowhandnohonor", en: "Chow Hand, No Honors/Flowers", zh: "平胡無字花", cat: "Structure", tai: 10, note: "",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀜", "🀜"], exCap: "A 5-chow-plus-pair hand that also holds zero dragons, winds, flowers, or seasons — numbers only." },
+  { id: "punghand", en: "Pung Hand (Toitoi)", zh: "對對胡", cat: "Structure", tai: 10, note: "No chows at all.",
+    ex: ["🀇", "🀇", "🀇", "🀈", "🀈", "🀈", "🀙", "🀙", "🀙", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐", "🀄", "🀄"], exCap: "Every one of the 5 sets is a triplet or kong — no sequential runs anywhere in the hand." },
+  { id: "nohonors", en: "No Honors", zh: "無字", cat: "Suits", tai: 1, note: "",
+    ex: ["🀇", "🀈", "🀉", "🀚", "🀛", "🀜"], exCap: "No dragon or wind tiles anywhere in the hand — numbered suits only (flowers still allowed)." },
+  { id: "noflowerhonor", en: "No Flowers and No Honors", zh: "無字無花", cat: "Suits", tai: 3, note: "",
+    ex: ["🀇", "🀈", "🀉", "🀚", "🀛", "🀜"], exCap: "No dragons, winds, flowers, or seasons at all — a hand made purely of numbered suit tiles." },
+  { id: "halfflush", en: "One Suit and Honors", zh: "混一色", cat: "Suits", tai: 10, note: "One numbered suit plus any honor tiles.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀄", "🀄", "🀄", "🀀", "🀀"], exCap: "Every numbered tile is Characters, and honor tiles (Red Dragon, East) round out the rest." },
+  { id: "fullflush", en: "One Suit Only", zh: "清一色", cat: "Suits", tai: 40, note: "One numbered suit, zero honors.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀇", "🀇", "🀇", "🀏", "🀏", "🀏", "🀋", "🀋"], exCap: "5 sets + a pair, and every single tile is a Character — no other suit, no honors at all. The rarest of the suit patterns." },
+  { id: "selfdraw", en: "Self-Drawn Last Tile", zh: "自摸", cat: "Timing", tai: 1, note: "",
+    ex: ["🀚"], exCap: "You drew the winning tile from the wall yourself, rather than claiming an opponent's discard." },
+  { id: "onechance", en: "Out on a One-Chance Chow", zh: "嵌張/邊張", cat: "Waits", tai: 1, note: "Closed wait, e.g. needing the middle of 1-_-3, or 8-9 needing 7.",
+    ex: ["🀇", "🀉", "→", "🀈"], exCap: "Holding Character 1 and 3, you can only complete the run with a 2 — a single-tile 'closed' wait." },
+  { id: "outonpair", en: "Out on a Pair", zh: "單釣", cat: "Waits", tai: 1, note: "Waiting to complete the pair only.",
+    ex: ["🀙", "→", "🀙"], exCap: "Every set is already complete; you're only waiting on a single tile to match your lone pair-tile." },
+  { id: "lastwall", en: "Out on Last Tile of Wall", zh: "海底撈月", cat: "Timing", tai: 1, note: "",
+    ex: ["🀫", "…", "🀚"], exCap: "You win on the very last tile drawable from the wall — 'fishing the moon from the sea floor.'" },
+  { id: "robkong", en: "Out by Robbing a Kong", zh: "搶槓", cat: "Timing", tai: 1, note: "",
+    ex: ["🀆", "🀆", "🀆", "+", "🀆"], exCap: "An opponent upgrades their pung to a kong with the exact tile that completes your hand — you claim it instead." },
+  { id: "early1", en: "Early Winning (6–9 discards)", zh: "早胡", cat: "Timing", tai: 5, note: "Won after more than 5 but fewer than 10 discards.",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "The hand closes out on roughly the 6th–9th discard of the round — fast, but not blazing." },
+  { id: "early2", en: "Early Winning (≤5 discards)", zh: "海底撈月", cat: "Timing", tai: 10, note: "Won within the first 5 discards.",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "The hand closes within the first 5 discards of the round — a very fast win." },
+  { id: "readyoriginal", en: "Ready on Original Hand", zh: "天聽", cat: "Timing", tai: 15, note: "The dealt 16 tiles were already tenpai.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀐", "🀑", "🀒", "🀙", "🀙", "🀚", "🀛"], exCap: "The 16 tiles originally dealt already form 4 complete sets, a pair, and a 2-tile run one tile short of the 5th set — tenpai before a single discard." },
+  { id: "threescholars", en: "Three Great Scholars", zh: "大三元", cat: "Limit", tai: 30, note: "All three dragon pungs/kongs.",
+    ex: ["🀄", "🀄", "🀄", "🀅", "🀅", "🀅", "🀆", "🀆", "🀆"], exCap: "All three dragons — Red, Green, White — as complete triplets or kongs." },
+  { id: "littlefourwinds", en: "Little Four Winds", zh: "小四喜", cat: "Limit", tai: 30, note: "3 wind pungs + wind pair.",
+    ex: ["🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀂", "🀂", "🀂", "🀃", "🀃"], exCap: "Three wind triplets plus a pair of the fourth wind — East, South, West as triplets, North as the pair." },
+  { id: "bigfourwinds", en: "Big Four Winds", zh: "大四喜", cat: "Limit", tai: 40, note: "All four wind pungs/kongs.",
+    ex: ["🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀂", "🀂", "🀂", "🀃", "🀃", "🀃"], exCap: "All four winds — East, South, West, North — as complete triplets or kongs." },
+  { id: "sevenpairs", en: "Seven Pairs + a Triplet", zh: "七對半", cat: "Limit", tai: 30, note: "16-tile variant of Seven Pairs.",
+    ex: ["🀇", "🀇", "🀈", "🀈", "🀉", "🀉", "🀊", "🀊", "🀋", "🀋", "🀌", "🀌", "🀙", "🀙", "🀍", "🀍", "🀍"], exCap: "Seven distinct pairs plus one extra triplet — 7×2 + 3 = 17 tiles, the 16-tile cousin of the classic Seven Pairs hand." },
+  { id: "heavenly", en: "Heavenly Hand", zh: "天胡", cat: "Limit", tai: 40, note: "Dealer wins with the original deal.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀙", "🀙", "🀙", "🀚", "🀚", "🀚", "🀛", "🀛"], exCap: "The dealer's original 16 tiles plus their first draw (17 total) already form 5 complete sets and a pair — before any play happens." },
+  { id: "earthly", en: "Earthly Hand", zh: "地胡", cat: "Limit", tai: 40, note: "Non-dealer wins on dealer's first discard.",
+    ex: ["🀫", "→", "🀚"], exCap: "A non-dealer completes their hand by claiming the very first tile the dealer discards." },
+];
+const GENERIC_SOURCE_LINES = [
+  "Baseline list: Four Winds Rule Collection, \"Taiwanese 16-Tile Mah Jong: Scoring.\"",
+  "4windsmj.com/kb/rules/taiwanese/rules05.htm — house rules vary; confirm against your table.",
+  "Examples are illustrative fragments, not always full legal 16-tile hands.",
+];
+
+/* ---- Seattle Mahjong Club ----------------------------------------
+   Source: the club's own printed scorecard, transcribed from photos
+   provided directly (Oct 2026). This is a house scorecard, not a
+   published public source — double-check against the physical card
+   or a club member if a value matters for a real game. The card's
+   newer, colorful redesign adds a "Kung of Any Kind = 0" line and a
+   "must be concealed" clause on 8 Pairs that the original plain
+   version doesn't have; both are included here, flagged below.
+--------------------------------------------------------------- */
+const SEATTLE_CATEGORIES = ["Basic", "Flush & Honor", "Concealed Triplets", "Lucky Hand", "Host Bonus", "Form Pattern", "Special Combination"];
+const SEATTLE_CAT_COLOR = {
+  Basic: "#4F7942", "Flush & Honor": "#3E6B8A", "Concealed Triplets": "#8C6B4F",
+  "Lucky Hand": "#B23A2E", "Host Bonus": "#C9A24B", "Form Pattern": "#7A8B99", "Special Combination": "#9B6B9E",
+};
+const SEATTLE_PATTERNS = [
+  { id: "sea-basic", en: "Flower / Wind / Dragon", zh: "花/風/龍", cat: "Basic", tai: 1, note: "Each flower tile, or each wind/dragon set, scores 1.",
+    ex: ["🀢", "🀀", "🀀", "🀀"], exCap: "A flower tile on its own, or a wind/dragon triplet — each is worth 1 on this card." },
+  { id: "sea-edge", en: "Single Side / Middle", zh: "邊/嵌張", cat: "Basic", tai: 1, note: "Inferred from the card's illustrated example page: a closed ('single-side'/edge, or 'middle'/kanchan) wait — not spelled out on the scoring table itself.",
+    ex: ["🀗", "🀘", "→", "🀖"], exCap: "Waiting only on the edge tile to finish a run (here, 7-8 needing 9) — a closed, single-tile wait." },
+  { id: "sea-host", en: "Host", zh: "莊", cat: "Basic", tai: 1, note: "Bonus for winning while seated as host (dealer).",
+    ex: ["🀀"], exCap: "Winning while you are the current host adds 1, on top of everything else." },
+  { id: "sea-selfdraw", en: "Self Draw", zh: "自摸", cat: "Basic", tai: 1, note: "",
+    ex: ["🀚"], exCap: "You drew the winning tile yourself instead of claiming a discard." },
+  { id: "sea-allconcealed", en: "All Concealed", zh: "全求人", cat: "Basic", tai: 1, note: "",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "No melds were ever called from another player." },
+  { id: "sea-allconcealedselfdraw", en: "All Concealed Self Draw", zh: "自摸不求人", cat: "Basic", tai: 3, note: "Stacks on top of All Concealed and Self Draw separately.",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "A fully concealed hand finished by self-draw." },
+  { id: "sea-allruns", en: "All Runs", zh: "平和", cat: "Basic", tai: 2, note: "No flowers or lettered (honor) tiles; cannot be won by self-draw.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀐", "🀑", "🀒", "🀙", "🀚", "🀛", "🀜", "🀜"], exCap: "A hand built entirely of runs, no flowers or honors — but specifically requires winning off a discard, not a self-draw." },
+  { id: "sea-allexposed", en: "All Exposed", zh: "全求人", cat: "Basic", tai: 2, note: "",
+    ex: ["🀄", "🀄", "🀄", "🀄"], exCap: "Every set was called/melded openly from other players' discards." },
+  { id: "sea-deadwall", en: "Dead Wall Draw", zh: "海底/槓上開花", cat: "Basic", tai: 1, note: "",
+    ex: ["🀫", "…", "🀚"], exCap: "Winning on a tile drawn from the dead wall (e.g. right after declaring a kong)." },
+  { id: "sea-lasttile", en: "Last Tile", zh: "海底撈月", cat: "Basic", tai: 1, note: "",
+    ex: ["🀫", "…", "🀚"], exCap: "Winning on the very last tile drawable from the wall." },
+  { id: "sea-kung", en: "Kung of Any Kind", zh: "槓", cat: "Basic", tai: 0, note: "Only on the card's newer colorful redesign, not the original plain version — included here, flagged as a possible later addition.",
+    ex: ["🀆", "🀆", "🀆", "🀆"], exCap: "Declaring a kong — melded or concealed — is worth 0 on its own under this scorecard; other lines (Concealed Triplets, etc.) may still apply." },
+  { id: "sea-halfflush", en: "Half Flush", zh: "混一色", cat: "Flush & Honor", tai: 8, note: "One suit with honor/letter tiles mixed in.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀄", "🀄", "🀄", "🀀", "🀀"], exCap: "One numbered suit (here, Characters) plus honor tiles." },
+  { id: "sea-flush", en: "Flush (Single Suit)", zh: "清一色", cat: "Flush & Honor", tai: 16, note: "",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀇", "🀇", "🀇", "🀏", "🀏", "🀏", "🀋", "🀋"], exCap: "The entire hand is one numbered suit, with no honor tiles at all." },
+  { id: "sea-allletters", en: "All Letters", zh: "字一色", cat: "Flush & Honor", tai: 20, note: "",
+    ex: ["🀄", "🀄", "🀄", "🀅", "🀅", "🀅", "🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀆", "🀆"], exCap: "Every tile is a dragon or a wind — no numbered suit tiles anywhere." },
+  { id: "sea-three-concealed", en: "Three Concealed Triplets", zh: "三暗刻", cat: "Concealed Triplets", tai: 3, note: "",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐"], exCap: "Three self-built (uncalled) triplets." },
+  { id: "sea-four-concealed", en: "Four Concealed Triplets", zh: "四暗刻", cat: "Concealed Triplets", tai: 6, note: "",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐", "🀄", "🀄", "🀄"], exCap: "Four concealed triplets — a fifth set and the pair complete the rest of the hand." },
+  { id: "sea-five-concealed", en: "Five Concealed Triplets", zh: "五暗刻", cat: "Concealed Triplets", tai: 12, note: "",
+    ex: ["🀇", "🀇", "🀇", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐", "🀄", "🀄", "🀄", "🀅", "🀅", "🀅"], exCap: "All five sets are concealed triplets — extremely rare." },
+  { id: "sea-heavenly", en: "Heavenly Hand", zh: "天胡", cat: "Lucky Hand", tai: 24, note: "Declare mahjong on the very first draw.",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏", "🀙", "🀙", "🀙", "🀚", "🀚", "🀚", "🀛", "🀛"], exCap: "The dealer's original hand plus first draw is already a complete win, before any discard happens." },
+  { id: "sea-miji", en: "MIJI Hand", zh: "", cat: "Lucky Hand", tai: 8, note: "Declare ready to win before the 9th discarded tile.",
+    ex: ["🀫", "🀫", "🀫", "🀫", "🀫", "🀫", "🀫", "🀫"], exCap: "You reach tenpai (ready to win) within the first 8 discards of the hand." },
+  { id: "sea-hostconsecutive", en: "Consecutive Times Being Host", zh: "連莊", cat: "Host Bonus", tai: "2X+1", note: "A formula, not a flat value: 2 × (consecutive times as host) + 1. Left out of the Quiz, since it isn't a fixed number to sum.",
+    ex: ["🀀", "🀀", "🀀"], exCap: "Example: winning as host for the 3rd consecutive time scores 2×3+1 = 7 on this line alone." },
+  { id: "sea-alltriplets", en: "All Triplets", zh: "對對胡", cat: "Form Pattern", tai: 4, note: "",
+    ex: ["🀇", "🀇", "🀇", "🀈", "🀈", "🀈", "🀙", "🀙", "🀙", "🀚", "🀚", "🀚", "🀐", "🀐", "🀐", "🀄", "🀄"], exCap: "Every set is a triplet or kong — no runs anywhere." },
+  { id: "sea-8pairs", en: "8 Pairs", zh: "七對半", cat: "Form Pattern", tai: 16, note: "7 pairs plus 1 triplet. The card's redesigned version adds: must be a concealed hand.",
+    ex: ["🀇", "🀇", "🀈", "🀈", "🀉", "🀉", "🀊", "🀊", "🀋", "🀋", "🀌", "🀌", "🀙", "🀙", "🀍", "🀍", "🀍"], exCap: "Seven pairs plus one extra triplet, all held concealed — no melds called." },
+  { id: "sea-samesequence", en: "Same Sequence in All Suits", zh: "三色同順", cat: "Form Pattern", tai: 5, note: "",
+    ex: ["🀇", "🀈", "🀉", "🀙", "🀚", "🀛", "🀐", "🀑", "🀒"], exCap: "The identical run (e.g. 1-2-3) repeated once in each of the three numbered suits." },
+  { id: "sea-sametriplets", en: "Same Triplets in All Suits", zh: "三色同刻", cat: "Form Pattern", tai: 5, note: "",
+    ex: ["🀋", "🀋", "🀋", "🀝", "🀝", "🀝", "🀓", "🀓", "🀓"], exCap: "The same number as a triplet, once in each of the three numbered suits (here, all 5s)." },
+  { id: "sea-onetonine", en: "One thru Nine Same Suit", zh: "一氣通貫", cat: "Form Pattern", tai: 5, note: "",
+    ex: ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏"], exCap: "1 through 9 of a single suit, as three consecutive runs." },
+  { id: "sea-bigfourwinds", en: "Big Four Winds", zh: "大四喜", cat: "Special Combination", tai: 16, note: "",
+    ex: ["🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀂", "🀂", "🀂", "🀃", "🀃", "🀃"], exCap: "All four winds as complete triplets or kongs." },
+  { id: "sea-smallfourwinds", en: "Small Four Winds", zh: "小四喜", cat: "Special Combination", tai: 12, note: "",
+    ex: ["🀀", "🀀", "🀀", "🀁", "🀁", "🀁", "🀂", "🀂", "🀂", "🀃", "🀃"], exCap: "Three wind triplets plus a pair of the fourth wind." },
+  { id: "sea-bigthreedragons", en: "Big Three Dragons", zh: "大三元", cat: "Special Combination", tai: 8, note: "",
+    ex: ["🀄", "🀄", "🀄", "🀅", "🀅", "🀅", "🀆", "🀆", "🀆"], exCap: "All three dragons as complete triplets or kongs." },
+  { id: "sea-smallthreedragons", en: "Small Three Dragons", zh: "小三元", cat: "Special Combination", tai: 4, note: "",
+    ex: ["🀄", "🀄", "🀄", "🀅", "🀅", "🀅", "🀆", "🀆"], exCap: "Two dragon triplets plus a pair of the third dragon." },
+  { id: "sea-8flowers", en: "8 Flowers / 7 Flowers", zh: "花牌", cat: "Special Combination", tai: 8, note: "",
+    ex: ["🀢", "🀣", "🀤", "🀥", "🀦", "🀧", "🀨", "🀩"], exCap: "Holding all 8 bonus tiles (or 7 of the 8, per the card's alternate) scores this bonus." },
+];
+const SEATTLE_SOURCE_LINES = [
+  "Baseline list: the Seattle Mahjong Club's own printed scorecard, transcribed from photos (Oct 2026).",
+  "This is a club house-rule sheet, not a published public source — worth confirming against the physical card or a club member if a value matters for a real game.",
+  "The \"Kung of Any Kind\" line (0) and the \"must be concealed\" clause on 8 Pairs appear only on the card's newer, colorful redesign, not the original plain version.",
+  "Examples are illustrative fragments, not always full legal 16-tile hands.",
+];
+
+const SYSTEMS = {
+  generic: { id: "generic", label: "Generic Internet", patterns: GENERIC_PATTERNS, categories: GENERIC_CATEGORIES, catColor: GENERIC_CAT_COLOR, sourceLines: GENERIC_SOURCE_LINES },
+  seattle: { id: "seattle", label: "Seattle Mahjong Club", patterns: SEATTLE_PATTERNS, categories: SEATTLE_CATEGORIES, catColor: SEATTLE_CAT_COLOR, sourceLines: SEATTLE_SOURCE_LINES },
+};
+
+const BOX_INTERVAL_DAYS = [0, 0, 1, 3, 7, 16, 32]; // index = box (1..6)
+const ACTIVE_SYSTEM_KEY = "tai-active-system-v1";
+const progressKey = (sid) => `tai-progress-v1:${sid}`;
+const statsKey = (sid) => `tai-stats-v1:${sid}`;
+
+function todayMs() { return Date.now(); }
+function addDays(ms, days) { return ms + days * 86400000; }
+
+/* ---------------------------------------------------------------
+   STORAGE HELPERS
+--------------------------------------------------------------- */
+async function loadJSON(key, fallback) {
+  try {
+    const res = await window.storage.get(key, false);
+    return res ? JSON.parse(res.value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+async function saveJSON(key, value) {
+  try {
+    await window.storage.set(key, JSON.stringify(value), false);
+  } catch (e) {
+    console.error("storage save failed", e);
+  }
+}
+async function loadText(key, fallback) {
+  try {
+    const res = await window.storage.get(key, false);
+    return res ? res.value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+async function saveText(key, value) {
+  try {
+    await window.storage.set(key, value, false);
+  } catch (e) {
+    console.error("storage save failed", e);
+  }
+}
+
+/* ---------------------------------------------------------------
+   TILE CHIP — the signature visual element
+--------------------------------------------------------------- */
+function TileChip({ pattern, catColor, size = "md", onClick, dim }) {
+  const color = catColor[pattern.cat] || "#4F7942";
+  return (
+    <button
+      onClick={onClick}
+      className={`tile-chip tile-${size}`}
+      style={{ borderColor: color, opacity: dim ? 0.45 : 1, cursor: onClick ? "pointer" : "default" }}
+    >
+      <span className="tile-zh" style={{ color }}>{pattern.zh.slice(0, 2)}</span>
+      <span className="tile-en">{pattern.en}</span>
+      <span className="tile-tai" style={{ background: color }}>{pattern.tai}</span>
+    </button>
+  );
+}
+
+/* ---------------------------------------------------------------
+   FLASHCARD VIEW
+--------------------------------------------------------------- */
+function FlashcardView({ system, progress, setProgress, stats, setStats }) {
+  const PATTERNS = system.patterns;
+  const CAT_COLOR = system.catColor;
+
+  const due = useMemo(() => {
+    const now = todayMs();
+    return PATTERNS.filter((p) => {
+      const rec = progress[p.id];
+      return !rec || rec.due <= now;
+    });
+  }, [progress, PATTERNS]);
+
+  const [queue, setQueue] = useState([]);
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+
+  useEffect(() => {
+    setQueue([...due].sort(() => Math.random() - 0.5));
+    setIdx(0);
+    setFlipped(false);
+  }, [due.length]);
+
+  const current = queue[idx];
+
+  const grade = useCallback((quality) => {
+    if (!current) return;
+    const rec = progress[current.id] || { box: 1, due: todayMs() };
+    let box = rec.box;
+    if (quality === "again") box = 1;
+    else if (quality === "good") box = Math.min(box + 1, 6);
+    else if (quality === "easy") box = Math.min(box + 2, 6);
+    const next = { box, due: addDays(todayMs(), BOX_INTERVAL_DAYS[box]) };
+    const newProgress = { ...progress, [current.id]: next };
+    setProgress(newProgress);
+    saveJSON(progressKey(system.id), newProgress);
+    const newStats = { ...stats, reviews: (stats.reviews || 0) + 1, correct: (stats.correct || 0) + (quality === "again" ? 0 : 1) };
+    setStats(newStats);
+    saveJSON(statsKey(system.id), newStats);
+    setFlipped(false);
+    setIdx((i) => i + 1);
+  }, [current, progress, stats, setProgress, setStats, system.id]);
+
+  if (!current) {
+    return (
+      <div className="empty-state">
+        <div className="empty-tile">休</div>
+        <p>Nothing due right now.</p>
+        <p className="muted">{PATTERNS.length - due.length} of {PATTERNS.length} patterns are resting in review. Come back later, or switch to Quiz.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flash-wrap">
+      <div className="flash-progress">{idx + 1} / {queue.length} due</div>
+      <div className={`flashcard ${flipped ? "is-flipped" : ""}`} onClick={() => setFlipped((f) => !f)}>
+        <div className="flash-face flash-front">
+          <span className="cat-label" style={{ color: CAT_COLOR[current.cat] }}>{current.cat}</span>
+          <h2>{current.en}</h2>
+          <p className="zh-large">{current.zh}</p>
+          <p className="tap-hint">tap to reveal tai</p>
+        </div>
+        <div className="flash-face flash-back">
+          <span className="tai-big" style={{ color: CAT_COLOR[current.cat] }}>
+            {typeof current.tai === "number" ? `${current.tai} tai` : current.tai}
+          </span>
+          {current.note && <p className="note">{current.note}</p>}
+        </div>
+      </div>
+      {flipped && (
+        <div className="grade-row">
+          <button className="grade-btn again" onClick={() => grade("again")}>Missed it</button>
+          <button className="grade-btn good" onClick={() => grade("good")}>Got it</button>
+          <button className="grade-btn easy" onClick={() => grade("easy")}>Easy</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   QUIZ VIEW — sum the tai for a mini "hand" of stacked patterns
+--------------------------------------------------------------- */
+function makeRound(PATTERNS) {
+  const pool = PATTERNS.filter((p) => typeof p.tai === "number");
+  const n = 2 + Math.floor(Math.random() * 2); // 2 or 3 patterns
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const picks = shuffled.slice(0, n);
+  return { picks, total: picks.reduce((s, p) => s + p.tai, 0) };
+}
+
+function QuizView({ system, stats, setStats }) {
+  const PATTERNS = system.patterns;
+  const CAT_COLOR = system.catColor;
+
+  const [round, setRound] = useState(() => makeRound(PATTERNS));
+  const [guess, setGuess] = useState("");
+  const [result, setResult] = useState(null); // null | 'right' | 'wrong'
+  const [streak, setStreak] = useState(0);
+
+  const submit = () => {
+    const val = parseInt(guess, 10);
+    if (Number.isNaN(val)) return;
+    const right = val === round.total;
+    setResult(right ? "right" : "wrong");
+    setStreak((s) => (right ? s + 1 : 0));
+    const newStats = { ...stats, quizAttempts: (stats.quizAttempts || 0) + 1, quizCorrect: (stats.quizCorrect || 0) + (right ? 1 : 0) };
+    setStats(newStats);
+    saveJSON(statsKey(system.id), newStats);
+  };
+
+  const next = () => {
+    setRound(makeRound(PATTERNS));
+    setGuess("");
+    setResult(null);
+  };
+
+  return (
+    <div className="quiz-wrap">
+      <div className="quiz-meta">
+        <span>Streak: {streak}</span>
+        <span className="muted">{stats.quizCorrect || 0}/{stats.quizAttempts || 0} correct all-time</span>
+      </div>
+      <p className="quiz-instruction">This hand scores the tai below. What's the total?</p>
+      <div className="tile-row">
+        {round.picks.map((p) => <TileChip key={p.id + Math.random()} pattern={{ ...p, tai: result ? p.tai : "?" }} catColor={CAT_COLOR} />)}
+      </div>
+      {!result ? (
+        <div className="answer-row">
+          <input
+            type="number"
+            inputMode="numeric"
+            value={guess}
+            onChange={(e) => setGuess(e.target.value)}
+            placeholder="total tai"
+            className="tai-input"
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+          <button className="submit-btn" onClick={submit}>Check</button>
+        </div>
+      ) : (
+        <div className="result-block">
+          <p className={`result-headline ${result}`}>
+            {result === "right" ? "Correct — " : "Not quite — "}total is {round.total} tai
+          </p>
+          <ul className="breakdown">
+            {round.picks.map((p) => (
+              <li key={p.id}><span>{p.en}</span><span>{p.tai} tai</span></li>
+            ))}
+          </ul>
+          <button className="next-btn" onClick={next}>Next hand →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   REFERENCE VIEW
+--------------------------------------------------------------- */
+function ReferenceView({ system }) {
+  const PATTERNS = system.patterns;
+  const CATEGORIES = system.categories;
+  const CAT_COLOR = system.catColor;
+
+  const [filter, setFilter] = useState("All");
+  const [openId, setOpenId] = useState(null);
+  const list = filter === "All" ? PATTERNS : PATTERNS.filter((p) => p.cat === filter);
+  return (
+    <div className="ref-wrap">
+      <div className="filter-row">
+        <button className={`filter-chip ${filter === "All" ? "active" : ""}`} onClick={() => setFilter("All")}>All</button>
+        {CATEGORIES.map((c) => (
+          <button key={c} className={`filter-chip ${filter === c ? "active" : ""}`} style={filter === c ? { background: CAT_COLOR[c] } : {}} onClick={() => setFilter(c)}>{c}</button>
+        ))}
+      </div>
+      <p className="ref-hint">Tap any pattern for a worked example.</p>
+      <div className="ref-list">
+        {list.map((p) => {
+          const open = openId === p.id;
+          return (
+            <div className="ref-item" key={p.id}>
+              <button className="ref-row" onClick={() => setOpenId(open ? null : p.id)} aria-expanded={open}>
+                <div className="ref-tai" style={{ background: CAT_COLOR[p.cat] }}>{p.tai}</div>
+                <div className="ref-text">
+                  <div className="ref-en">{p.en} {p.zh && <span className="ref-zh">{p.zh}</span>}</div>
+                  {p.note && <div className="ref-note">{p.note}</div>}
+                </div>
+                <div className={`ref-chevron ${open ? "open" : ""}`}>▾</div>
+              </button>
+              {open && (
+                <div className="ref-example">
+                  <div className="ref-example-tiles">
+                    {p.ex.map((t, i) => (
+                      <span key={i} className={/[\u{1F000}-\u{1F02B}]/u.test(t) ? "ex-tile" : "ex-glyph"}>{t}</span>
+                    ))}
+                  </div>
+                  <p className="ref-example-cap">{p.exCap}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="source-note">
+        {system.sourceLines.map((line, i) => (
+          <React.Fragment key={i}>
+            {line}
+            {i < system.sourceLines.length - 1 && <br />}
+          </React.Fragment>
+        ))}
+      </p>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   APP
+--------------------------------------------------------------- */
+function App() {
+  const [systemId, setSystemId] = useState("generic");
+  const [tab, setTab] = useState("reference");
+  const [progress, setProgress] = useState({});
+  const [stats, setStats] = useState({});
+  const [loaded, setLoaded] = useState(false);
+
+  // restore last-chosen system once, on first mount
+  useEffect(() => {
+    (async () => {
+      const saved = await loadText(ACTIVE_SYSTEM_KEY, null);
+      if (saved && SYSTEMS[saved]) setSystemId(saved);
+    })();
+  }, []);
+
+  // (re)load progress/stats whenever the active system changes
+  useEffect(() => {
+    setLoaded(false);
+    (async () => {
+      const [p, s] = await Promise.all([
+        loadJSON(progressKey(systemId), {}),
+        loadJSON(statsKey(systemId), {}),
+      ]);
+      setProgress(p);
+      setStats(s);
+      setLoaded(true);
+    })();
+  }, [systemId]);
+
+  const system = SYSTEMS[systemId];
+
+  const switchSystem = (sid) => {
+    if (sid === systemId) return;
+    setSystemId(sid);
+    saveText(ACTIVE_SYSTEM_KEY, sid);
+  };
+
+  const dueCount = useMemo(() => {
+    const now = todayMs();
+    return system.patterns.filter((p) => !progress[p.id] || progress[p.id].due <= now).length;
+  }, [progress, system]);
+
+  return (
+    <div className="app-root">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap');
+
+        * { box-sizing: border-box; }
+        .app-root {
+          min-height: 100vh;
+          background:
+            radial-gradient(circle at 20% -10%, rgba(255,255,255,0.05), transparent 40%),
+            repeating-linear-gradient(135deg, #123329 0px, #123329 2px, #103026 2px, #103026 4px),
+            #123329;
+          font-family: 'Inter', sans-serif;
+          color: #F1EAD7;
+          padding: 0 0 90px 0;
+          max-width: 480px;
+          margin: 0 auto;
+        }
+        .header {
+          padding: 28px 20px 16px;
+          text-align: center;
+        }
+        .header-tile {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          background: #F1EAD7;
+          color: #16332B;
+          padding: 10px 22px;
+          border-radius: 6px;
+          box-shadow: 0 3px 0 rgba(0,0,0,0.25), 0 8px 20px rgba(0,0,0,0.35);
+        }
+        .header-tile .seal {
+          background: #B23A2E;
+          color: #F1EAD7;
+          width: 26px; height: 26px;
+          border-radius: 4px;
+          display: flex; align-items: center; justify-content: center;
+          font-family: 'Noto Serif TC', serif;
+          font-weight: 700;
+          font-size: 15px;
+        }
+        .header-tile h1 {
+          font-family: 'Noto Serif TC', serif;
+          font-weight: 900;
+          font-size: 20px;
+          margin: 0;
+          letter-spacing: 0.02em;
+        }
+        .header p.sub {
+          margin: 12px 0 0;
+          font-size: 13px;
+          color: #B7C4B9;
+        }
+        .system-switch {
+          display: flex; gap: 6px; margin: 16px 20px 0;
+          background: rgba(241,234,215,0.08); border-radius: 12px; padding: 4px;
+        }
+        .system-btn {
+          flex: 1; padding: 10px 8px; border-radius: 9px; border: none;
+          background: none; color: #B7C4B9; font-size: 12.5px; font-weight: 600;
+          cursor: pointer; font-family: 'Inter', sans-serif; line-height: 1.3;
+        }
+        .system-btn.active { background: #F1EAD7; color: #16332B; }
+        .due-banner {
+          margin: 14px 20px 0;
+          text-align: center;
+          font-size: 12px;
+          color: #C9A24B;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .tab-content { padding: 20px; }
+
+        /* Flashcards */
+        .flash-wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+        .flash-progress { font-size: 12px; color: #B7C4B9; letter-spacing: 0.05em; text-transform: uppercase; }
+        .flashcard {
+          width: 100%;
+          min-height: 260px;
+          background: #F1EAD7;
+          color: #241F19;
+          border-radius: 14px;
+          box-shadow: 0 4px 0 rgba(0,0,0,0.3), 0 14px 30px rgba(0,0,0,0.4);
+          position: relative;
+          cursor: pointer;
+          display: flex;
+        }
+        .flash-face {
+          width: 100%;
+          padding: 28px 24px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+        }
+        .flash-back { display: none; }
+        .flashcard.is-flipped .flash-front { display: none; }
+        .flashcard.is-flipped .flash-back { display: flex; }
+        .cat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; }
+        .flash-front h2 {
+          font-family: 'Noto Serif TC', serif;
+          font-size: 24px;
+          margin: 12px 0 4px;
+          line-height: 1.25;
+        }
+        .zh-large { font-family: 'Noto Serif TC', serif; font-size: 26px; color: #6b6353; margin: 6px 0 18px; }
+        .tap-hint { font-size: 12px; color: #948a75; margin-top: auto; }
+        .tai-big { font-family: 'Noto Serif TC', serif; font-size: 36px; font-weight: 900; }
+        .note { font-size: 13px; color: #5c5648; margin-top: 12px; max-width: 320px; }
+        .grade-row { display: flex; gap: 10px; width: 100%; }
+        .grade-btn {
+          flex: 1; padding: 13px 8px; border-radius: 10px; border: none;
+          font-weight: 600; font-size: 13px; cursor: pointer; color: #fff;
+        }
+        .grade-btn.again { background: #7a4038; }
+        .grade-btn.good { background: #4F7942; }
+        .grade-btn.easy { background: #C9A24B; color: #241F19; }
+
+        .empty-state { text-align: center; padding: 60px 20px; }
+        .empty-tile {
+          font-family: 'Noto Serif TC', serif; font-size: 30px; font-weight: 900;
+          width: 60px; height: 60px; line-height: 60px; margin: 0 auto 16px;
+          background: #F1EAD7; color: #16332B; border-radius: 8px;
+        }
+        .muted { color: #8fa093; font-size: 13px; }
+
+        /* Quiz */
+        .quiz-wrap { display: flex; flex-direction: column; gap: 16px; }
+        .quiz-meta { display: flex; justify-content: space-between; font-size: 13px; color: #C9A24B; }
+        .quiz-instruction { font-size: 15px; color: #E4DCC8; }
+        .tile-row { display: flex; flex-direction: column; gap: 10px; }
+        .tile-chip {
+          display: flex; align-items: center; gap: 10px;
+          background: #F1EAD7; border: 2px solid; border-radius: 8px;
+          padding: 10px 12px; text-align: left; width: 100%;
+          font-family: 'Inter', sans-serif;
+        }
+        .tile-zh { font-family: 'Noto Serif TC', serif; font-weight: 700; font-size: 16px; }
+        .tile-en { flex: 1; font-size: 13px; color: #241F19; font-weight: 500; }
+        .tile-tai { color: #fff; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+        .answer-row { display: flex; gap: 10px; }
+        .tai-input {
+          flex: 1; padding: 14px; border-radius: 10px; border: none;
+          font-size: 18px; background: #F1EAD7; color: #241F19; text-align: center;
+        }
+        .submit-btn, .next-btn {
+          padding: 14px 20px; border-radius: 10px; border: none;
+          background: #C9A24B; color: #241F19; font-weight: 700; cursor: pointer;
+        }
+        .result-block { display: flex; flex-direction: column; gap: 12px; }
+        .result-headline { font-weight: 700; font-size: 15px; }
+        .result-headline.right { color: #7fbf6a; }
+        .result-headline.wrong { color: #d98a6a; }
+        .breakdown { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+        .breakdown li { display: flex; justify-content: space-between; font-size: 13px; background: rgba(241,234,215,0.08); padding: 8px 12px; border-radius: 6px; }
+
+        /* Reference */
+        .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .filter-chip {
+          padding: 7px 12px; border-radius: 20px; border: 1px solid #3c5a4d;
+          background: transparent; color: #E4DCC8; font-size: 12px; cursor: pointer;
+        }
+        .filter-chip.active { color: #16332B; border-color: transparent; font-weight: 700; }
+        .ref-hint { font-size: 12px; color: #7b9186; margin: 0 0 10px; }
+        .ref-list { display: flex; flex-direction: column; gap: 8px; }
+        .ref-item { background: rgba(241,234,215,0.06); border-radius: 8px; overflow: hidden; }
+        .ref-row {
+          display: flex; gap: 12px; align-items: flex-start; width: 100%;
+          background: none; border: none; padding: 10px 12px; text-align: left; cursor: pointer;
+          font-family: 'Inter', sans-serif; color: inherit;
+        }
+        .ref-tai { min-width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 12px; flex-shrink: 0; padding: 0 4px; }
+        .ref-text { flex: 1; }
+        .ref-en { font-size: 14px; font-weight: 500; color: #C6D0C8; }
+        .ref-zh { font-family: 'Noto Serif TC', serif; color: #C6D0C8; margin-left: 6px; font-size: 13px; }
+        .ref-note { font-size: 12px; color: #C6D0C8; opacity: 0.75; margin-top: 2px; }
+        .ref-chevron { color: #7b9186; font-size: 13px; margin-top: 2px; transition: transform 0.15s ease; flex-shrink: 0; }
+        .ref-chevron.open { transform: rotate(180deg); }
+        .ref-example { padding: 4px 14px 16px 14px; }
+        .ref-example-tiles {
+          display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+          background: #F1EAD7; border-radius: 8px; padding: 12px; margin-bottom: 10px;
+        }
+        .ex-tile {
+          font-size: 26px; line-height: 1; color: #16332B;
+          filter: drop-shadow(0 1px 0 rgba(0,0,0,0.15));
+        }
+        .ex-glyph { font-size: 13px; color: #6b6353; font-weight: 600; align-self: center; }
+        .ref-example-cap { font-size: 12.5px; color: #cfd8ce; line-height: 1.5; margin: 0; }
+        .source-note { font-size: 11px; color: #6f8378; margin-top: 20px; line-height: 1.6; }
+
+        /* Tabs */
+        .tab-bar {
+          position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+          width: 100%; max-width: 480px;
+          display: flex; background: #0d241d; border-top: 1px solid #234437;
+        }
+        .tab-btn {
+          flex: 1; padding: 14px 0 max(14px, env(safe-area-inset-bottom)); background: none; border: none;
+          color: #7b9186; font-size: 12px; font-weight: 600; cursor: pointer;
+          display: flex; flex-direction: column; align-items: center; gap: 4px;
+        }
+        .tab-btn.active { color: #C9A24B; }
+        .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0; }
+        .tab-btn.active .tab-dot { opacity: 1; }
+      `}</style>
+
+      <div className="header">
+        <div className="header-tile">
+          <span className="seal">台</span>
+          <h1>Tai Trainer</h1>
+        </div>
+        <p className="sub">Taiwanese Mahjong scoring drills</p>
+      </div>
+
+      <div className="system-switch">
+        {Object.values(SYSTEMS).map((s) => (
+          <button
+            key={s.id}
+            className={`system-btn ${systemId === s.id ? "active" : ""}`}
+            onClick={() => switchSystem(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {loaded && tab === "flash" && (
+        <div className="due-banner">{dueCount} of {system.patterns.length} patterns due for review</div>
+      )}
+
+      <div className="tab-content">
+        {!loaded ? (
+          <p className="muted" style={{ textAlign: "center", marginTop: 60 }}>Loading your progress…</p>
+        ) : tab === "flash" ? (
+          <FlashcardView key={systemId} system={system} progress={progress} setProgress={setProgress} stats={stats} setStats={setStats} />
+        ) : tab === "quiz" ? (
+          <QuizView key={systemId} system={system} stats={stats} setStats={setStats} />
+        ) : (
+          <ReferenceView key={systemId} system={system} />
+        )}
+      </div>
+
+      <div className="tab-bar">
+        <button className={`tab-btn ${tab === "reference" ? "active" : ""}`} onClick={() => setTab("reference")}>
+          <span className="tab-dot" />Reference
+        </button>
+        <button className={`tab-btn ${tab === "flash" ? "active" : ""}`} onClick={() => setTab("flash")}>
+          <span className="tab-dot" />Flashcards
+        </button>
+        <button className={`tab-btn ${tab === "quiz" ? "active" : ""}`} onClick={() => setTab("quiz")}>
+          <span className="tab-dot" />Quiz
+        </button>
+      </div>
+    </div>
+  );
+}
+
+</script>
+
+<script>
+  window.storage = {
+    get: async (key) => {
+      let raw = null;
+      try { raw = localStorage.getItem('tai-trainer:' + key); } catch (e) {}
+      if (raw === null) throw new Error('not found');
+      return { key, value: raw, shared: false };
+    },
+    set: async (key, value) => {
+      try { localStorage.setItem('tai-trainer:' + key, value); } catch (e) {}
+      return { key, value, shared: false };
+    },
+  };
+
+  function showBootError(msg) {
+    var e = document.getElementById('boot-error');
+    e.style.display = 'block';
+    e.textContent = 'Something failed to load:\n\n' + msg;
+  }
+  window.addEventListener('error', function (e) { showBootError(e.message); });
+
+  try {
+    var src = document.getElementById('app-source').textContent;
+    var compiled = Babel.transform(src, {
+      presets: [['react', { runtime: 'classic' }]],
+    }).code;
+    var run = new Function('React', 'ReactDOM', 'useState', 'useEffect', 'useMemo', 'useCallback',
+      compiled + '\nreturn App;');
+    var App = run(React, ReactDOM, React.useState, React.useEffect, React.useMemo, React.useCallback);
+    var root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  } catch (e) {
+    showBootError(e.message);
+  }
+</script>
+</body>
+</html>
